@@ -892,6 +892,60 @@
 
         async function startEngines() {
             try {
+                const holistic = new Holistic({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}` });
+                holistic.setOptions({
+                    modelComplexity: 1,
+                    smoothLandmarks: true,
+                    minDetectionConfidence: 0.7,
+                    minTrackingConfidence: 0.7,
+                    enableSegmentation: true
+                });
+                holistic.onResults(res => {
+                    currentHands = [];
+                    if (res.leftHandLandmarks) currentHands.push(res.leftHandLandmarks);
+                    if (res.rightHandLandmarks) currentHands.push(res.rightHandLandmarks);
+                    currentPose = res.poseLandmarks;
+                    currentMask = res.segmentationMask;
+                });
+
+                let stream;
+                const constraints = {
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 1280, max: 1920 },
+                        height: { ideal: 720, max: 1080 }
+                    }
+                };
+
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (e) {
+                    console.error("Camera error:", e);
+                    loaderEl.innerHTML = `CAMERA ERROR: ${e.name}`;
+                    return;
+                }
+
+                vid.srcObject = stream;
+                await vid.play();
+                loaderEl.style.display = 'none';
+                statusEl.textContent = 'SYSTEM READY';
+
+                const camera = new Camera(vid, {
+                    onFrame: async () => { await holistic.send({ image: vid }); },
+                    width: 1280,
+                    height: 720
+                });
+                camera.start();
+            } catch (err) {
+                console.error("Engine Start Error:", err);
+                loaderEl.innerHTML = "ENGINE INITIALIZATION FAILED";
+            }
+        }
+        startEngines();
+    </script>
+</body>
+
+</html>
                 
                             
         
