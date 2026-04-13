@@ -136,4 +136,76 @@ python3 -m http.server 8000
 ---
 
 ## 🎮 Controls
+| Action | Gesture |
+|---|---|
+| **Activate Portal** | Bring both index fingers within ~150px of each other |
+| **Expand Portal** | Spread thumbs and index fingers apart |
+| **Move Portal** | Move both hands together |
+| **Deactivate** | Separate hands far apart |
+
+---
+
+## ⚙️ Performance
+
+| Metric | Value |
+|---|---|
+| Particles | 10,000 squares |
+| Layers | 3 (BACK / MID / FRONT) |
+| Mask Resolution | 100×100 |
+| Target FPS | 30-60 (device dependent) |
+| Pose Landmarks | 33 points |
+| Hand Landmarks | 21 points × 2 hands |
+
+### Optimizations
+- **SIN lookup table** (1024 entries) — eliminates `Math.sin()` calls in particle updates
+- **Random LUT** (5000 entries) — pre-computed random values
+- **Single body clip path** — one `ctx.clip()` for all 10K particles
+- **Batched layer rendering** — particles grouped by depth layer to minimize state changes
+- **Square particles** — `fillRect` is faster than `arc` + `fill`
+
+---
+
+## 📁 Project Structure
+
+```
+XRayVision/
+├── index.html      ← Entire application (single file, ~45KB)
+└── README.md       ← You are here
+```
+
+Yes, the entire engine is a **single HTML file**. No dependencies to install, no build pipeline, no node_modules black hole.
+
+---
+
+## 🧪 Tech Stack
+
+| Technology | Purpose |
+|---|---|
+| **HTML5 Canvas** | All rendering (2D context) |
+| **MediaPipe Holistic** | Hand tracking, pose estimation, body segmentation |
+| **Vanilla JavaScript** | Application logic, particle system, HUD |
+| **CSS** | Minimal UI styling |
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/thermal-mode`)
+3. Commit your changes (`git commit -m 'Add thermal scan mode'`)
+4. Push to the branch (`git push origin feature/thermal-mode`)
+5. Open a Pull Request
+
+---
+
+## 📜 License
+
+This project is open source. Feel free to use, modify, and distribute.
+
+---
+
+<p align="center">
+  <sub>Built with 🧠 and ☢️ by <a href="https://github.com/Axshatt">Akshat Singh</a></sub>
+</p>
+
 
