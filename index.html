@@ -631,5 +631,267 @@
                         const bodyPath = new Path2D();
                         const headPoints = [];
                         for (let i = 0; i <= 8; i++) {
+                            const ang = Math.PI + (i / 8) * Math.PI;
+                            headPoints.push({ x: hCX + Math.cos(ang) * hWidth / 2, y: hCY + Math.sin(ang) * hWidth / 1.8 });
+                        }
+
+                        const rawPoints = [
+                            hEarR, getPt(10), getPt(12), getPt(14), getPt(16),
+                            getPt(20), getPt(18), getPt(22), // Add hand specifics
+                            getPt(24), getPt(26), getPt(28), getPt(32),
+                            getPt(31), getPt(27), getPt(25), getPt(23),
+                            getPt(21), getPt(17), getPt(19), // Add hand specifics
+                            getPt(15), getPt(13), getPt(11), hEarL, getPt(9)
+                        ];
+
+                        const thickPoints = rawPoints.map((p, i) => {
+                            let amt = 25; // Default Torso
+                            if (p === hEarR || p === hEarL) amt = 8;
+                            if (i >= 2 && i <= 7) amt = 12; // Right Arm / Hand
+                            if (i >= 8 && i <= 10) amt = 18; // Right Leg
+                            if (i >= 12 && i <= 14) amt = 18; // Left Leg
+                            if (i >= 16 && i <= 21) amt = 12; // Left Arm / Hand
+                            return expandOutward(p, cX, amt);
+                        });
+
+                        bodyPath.moveTo(headPoints[0].x, headPoints[0].y);
+                        headPoints.forEach(p => bodyPath.lineTo(p.x, p.y));
+                        thickPoints.forEach(p => bodyPath.lineTo(p.x, p.y));
+                        bodyPath.closePath();
+
+                        // 2. MASK-BASED PARTICLE REDISTRIBUTION
+                        let validCoords = [];
+                        if (currentMask) {
+                            mctx.clearRect(0, 0, maskCv.width, maskCv.height);
+                            mctx.drawImage(currentMask, 0, 0, maskCv.width, maskCv.height);
+                            const imgData = mctx.getImageData(0, 0, maskCv.width, maskCv.height).data;
+                            for (let i = 0; i < imgData.length; i += 4) {
+                                if (imgData[i] > 128) { // Threshold for subject fill
+                                    const idx = i / 4;
+                                    validCoords.push({
+                                        x: (idx % maskCv.width) / maskCv.width,
+                                        y: Math.floor(idx / maskCv.width) / maskCv.height
+                                    });
+                                }
+                            }
+                        }
+
+                        // 2. PARTICLE DISTRIBUTION (Mask + Specific Head Coverage)
+                        const hTarget = getPt(0); // Nose/Head center
+
+                        for (let i = 0; i < 10000; i++) {
+                            const p = BODY_PARTICLES[i];
+
+                            // Dedicated Head Density (First 1500 particles)
+                            if (i < 1500) {
+                                if (frame % 8 === 0 || dist(p, { x: p.targetX, y: p.targetY }) < 5) {
+                                    const ang = Math.random() * Math.PI * 2;
+                                    const rad = Math.random() * (hWidth * 0.45);
+                                    p.targetX = hCX + Math.cos(ang) * rad;
+                                    p.targetY = hCY + Math.sin(ang) * rad * 1.25; // Elliptical height
+                                    p.colorTier = 0; // Head color
+                                }
+                            } else if (validCoords.length > 0) {
+                                // Body Fill
+                                if (frame % 5 === 0 || dist(p, { x: p.targetX, y: p.targetY }) < 5) {
+                                    const coord = validCoords[Math.floor(Math.random() * validCoords.length)];
+                                    const target = mapToPortal(coord.x, coord.y, px, py, pw, ph);
+                                    p.targetX = target.x; p.targetY = target.y;
+                                    p.colorTier = getAnatomicalZone(target.y, currentPose, px, py, ph);
+                                }
+                            } else {
+                                // Fallback to Torso
+                                if (frame % 20 === 0) {
+                                    p.targetX = cX + (Math.random() - 0.5) * 50;
+                                    p.targetY = cY + (Math.random() - 0.5) * 80;
+                                }
+                            }
+                        }
+
+                        // 3. RENDER LAYERS (Optimized Batch Clipping)
+                        surgeT = (frame % 180) / 180;
+                        const surgeRadius = surgeT * H * 0.8;
+
+                        ctx.save();
+                        ctx.clip(bodyPath); // GLOBAL BODY CLIP - One call = massive speedup
+
+                        ['BACK', 'MID', 'FRONT'].forEach(layer => {
+                            let start = 0, end = 3000;
+                            if (layer === 'MID') { start = 3000; end = 7000; }
+                            if (layer === 'FRONT') { start = 7000; end = 10000; }
+
+                            for (let i = start; i < end; i++) {
+                                const p = BODY_PARTICLES[i];
+                                p.update(0, 0, isGlitching);
+
+                                // Surge logic
+                                const dToC = dist(p, { x: cX, y: cY });
+                                if (Math.abs(dToC - surgeRadius) < 20) {
+                                    p.size *= 1.8; p.life = 1.0;
+                                    p.x += (p.x - cX) * 0.1; p.y += (p.y - cY) * 0.1;
+                                }
+
+                                p.draw(ctx, layer);
+                            }
+                        });
+                        ctx.restore(); // End Global Body Clip
+
+
+
+                        // 5. JOINT RING FX + ORBITING NODES
+                        const joints = [11, 12, 13, 14, 23, 24, 25, 26, 27, 28];
+                        joints.forEach(jIdx => {
+                            if (currentPose[jIdx] && currentPose[jIdx].visibility > 0.5) {
+                                const pt = getPt(jIdx);
+                                // Orbiting particles
+
+                                // Orbiting particles
+                                const orbitAngle = frame * 0.08 + jIdx * 0.7;
+                                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                                for (let i = 0; i < 4; i++) {
+                                    const ox = pt.x + Math.cos(orbitAngle + i * Math.PI / 2) * 5;
+                                    const oy = pt.y + Math.sin(orbitAngle + i * Math.PI / 2) * 5;
+                                    ctx.fillRect(ox - 1, oy - 1, 2, 2);
+                                }
+                            }
+                        });
+
+                        // 5B. DATA STREAM COLUMNS
+                        ctx.fillStyle = 'rgba(0, 255, 204, 0.3)';
+                        for (let col = 0; col < 5; col++) {
+                            const colX = px + (pw / 6) * (col + 1);
+                            const riseY = py + ph - ((frame * 2 + col * 40) % ph);
+                            if (ctx.isPointInPath(bodyPath, colX, riseY)) {
+                                ctx.fillRect(colX, riseY, 1, 15);
+                            }
+                        }
+
+
+
+                        // Joints Count for HUD
+                        let vizJoints = 0;
+                        for (let i = 0; i <= 32; i++) {
+                            if (pose[i] && pose[i].visibility > 0.4) vizJoints++;
+                        }
+
+                        // FEATURE 6: LIVE DATA HUD (Neural Void Styling)
+                        ctx.save();
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = isGlitching ? 'rgba(255,0,0,0.4)' : 'rgba(0,0,0,0.85)';
+                        ctx.strokeStyle = '#00ffff';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.roundRect(hudPos.x, hudPos.y, 140, 90, 4); ctx.fill(); ctx.stroke();
+
+                        // Vertical "Status" Stripe
+                        ctx.fillStyle = isGlitching ? '#ff0000' : '#00ffcc';
+                        ctx.fillRect(hudPos.x, hudPos.y, 4, 90);
+
+                        // Rotating Radar Detail
+                        ctx.save();
+                        ctx.translate(hudPos.x + 125, hudPos.y + 20);
+                        ctx.rotate(frame * 0.05);
+                        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 0.5;
+                        ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(8, 0); ctx.moveTo(0, -8); ctx.lineTo(0, 8); ctx.stroke();
+                        ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.stroke();
+                        ctx.restore();
+
+                        ctx.fillStyle = '#00ffff'; ctx.font = 'bold 9px Courier New'; ctx.textAlign = "left";
+                        ctx.fillText('► NEURAL_CORE BIOSCAN', hudPos.x + 10, hudPos.y + 15);
+                        ctx.fillText(`► NODES: ${vizJoints}/33`, hudPos.x + 10, hudPos.y + 28);
+                        ctx.fillText(`► HEX: 0x${Math.floor(Math.random() * 0xFFFF).toString(16).toUpperCase()}`, hudPos.x + 10, hudPos.y + 41);
+                        ctx.fillText(`► STABILITY: ${(98 + Math.random() * 2).toFixed(1)}%`, hudPos.x + 10, hudPos.y + 54);
+                        ctx.fillText(`► FLUX:   ${(Math.random() * 1000).toFixed(0)} GHz`, hudPos.x + 10, hudPos.y + 67);
+                        ctx.fillText(`► STATUS: [SYNCHRONIZED]`, hudPos.x + 10, hudPos.y + 80);
+
+                        // Joint Tags (Micro-Telemetry)
+                        [13, 14, 25, 26].forEach(idx => {
+                            const pt = getPt(idx);
+                            if (currentPose[idx].visibility > 0.5) {
+                                ctx.fillStyle = 'rgba(0, 255, 255, 0.4)';
+                                ctx.font = '7px Courier New';
+                                ctx.fillText(`[${idx}:${(Math.random() * 100).toFixed(0)}%]`, pt.x + 10, pt.y);
+                            }
+                        });
+
+                        ctx.restore();
+
+                        // Update stream
+                        for (let i = streamParticles.length - 1; i >= 0; i--) {
+                            let p = streamParticles[i];
+                            p.update(); p.draw(ctx);
+                            if (p.life <= 0) streamParticles.splice(i, 1);
+                        }
+                    }
+
+                    // Intense Laser Scanline
+                    const sy = py + ((scanY % 1) * ph);
+                    const sg = ctx.createLinearGradient(0, sy - 60, 0, sy);
+                    sg.addColorStop(0, 'rgba(0,255,255,0)'); sg.addColorStop(1, 'rgba(0,255,255,0.8)');
+                    ctx.fillStyle = sg; ctx.fillRect(px, Math.max(py, sy - 60), pw, sy - Math.max(py, sy - 60));
+                    ctx.fillStyle = '#ffffff'; ctx.shadowBlur = 15; ctx.shadowColor = '#00ffff';
+                    ctx.fillRect(px, sy - 2, pw, 2); ctx.shadowBlur = 0;
+
+                    // FEATURE 3: SCAN ERROR / GLITCH OVERLAY
+                    if (isGlitching) {
+                        // 3A: Horizontal Slices
+                        try {
+                            const numSlices = 3 + Math.floor(Math.random() * 4);
+                            for (let i = 0; i < numSlices; i++) {
+                                const sY = py + Math.random() * (ph - 20);
+                                const sH = 8 + Math.random() * 12;
+                                const sOff = (Math.random() - 0.5) * 80;
+                                ctx.drawImage(cv, px, sY, pw, sH, px + sOff, sY, pw, sH);
+                            }
+                        } catch (e) { } // Ignore if canvas tainted by specific cors environments
+
+                        // 3C: White Flash + Noise
+                        if (Math.random() < 0.3) {
+                            ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(px, py, pw, ph);
+                            ctx.fillStyle = '#fff';
+                            for (let j = 0; j < 200; j++) ctx.fillRect(px + Math.random() * pw, py + Math.random() * ph, 1, 1);
+                            ctx.fillStyle = 'rgba(255,50,50,0.9)'; ctx.font = 'bold 16px Courier M';
+                            ctx.fillText('SCAN INTERRUPT', px + pw / 2 - 60, py + ph / 2);
+                        }
+
+                        // 3D: Corrupt Text
+                        ctx.fillStyle = 'rgba(255,50,50,0.7)'; ctx.font = '10px Courier New';
+                        for (let i = 0; i < 5; i++) {
+                            const errs = ['0xFFE3 >> CORRUPT', '4A:2C:FF >> NULL', 'ERR: SEG FAULT', 'BUFFER UNDERRUN'];
+                            ctx.fillText(errs[Math.floor(Math.random() * errs.length)], px + Math.random() * (pw - 100), py + Math.random() * ph);
+                        }
+                    }
+
+                    ctx.restore();
+
+
+                    const bHue = 180 + Math.sin(frame * 0.02) * 20;
+                    [{ lw: 6, col: `hsla(${bHue}, 100%, 60%, 0.2)`, blur: 25 }, { lw: 1.5, col: `hsla(${bHue}, 100%, 60%, 0.9)`, blur: 10 }].forEach(pass => {
+                        ctx.beginPath(); ctx.moveTo(lThumbS.x, lThumbS.y); ctx.lineTo(rThumbS.x, rThumbS.y);
+                        ctx.lineTo(rIndexS.x, rIndexS.y); ctx.lineTo(lIndexS.x, lIndexS.y); ctx.closePath();
+                        ctx.lineWidth = pass.lw; ctx.strokeStyle = pass.col; ctx.shadowBlur = pass.blur;
+                        ctx.shadowColor = `hsl(${bHue}, 100%, 60%)`; ctx.stroke();
+                    });
+                    ctx.shadowBlur = 0;
+
+                    // Flat turquoise corner squares matching reference image
+                    const sq = 24;
+                    ctx.fillStyle = 'rgba(0, 255, 180, 0.8)';
+                    ctx.shadowBlur = 15; ctx.shadowColor = 'rgba(0, 255, 180, 1)';
+                    ctx.fillRect(lThumbS.x - sq / 2, lThumbS.y - sq / 2, sq, sq);
+                    ctx.fillRect(rThumbS.x - sq / 2, rThumbS.y - sq / 2, sq, sq);
+                    ctx.fillRect(rIndexS.x - sq / 2, rIndexS.y - sq / 2, sq, sq);
+                    ctx.fillRect(lIndexS.x - sq / 2, lIndexS.y - sq / 2, sq, sq);
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            drawHudNodes();
+            requestAnimationFrame(drawFrame);
+        }
+        requestAnimationFrame(drawFrame);
+
+        async function startEngines() {
+            try {
+                
                             
         
