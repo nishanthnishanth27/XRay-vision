@@ -203,9 +203,3 @@ Yes, the entire engine is a **single HTML file**. No dependencies to install, no
 This project is open source. Feel free to use, modify, and distribute.
 
 ---
-
-<p align="center">
-  <sub>Built with 🧠 and ☢️ by <a href="https://github.com/Axshatt">Akshat Singh</a></sub>
-</p>
-
-
